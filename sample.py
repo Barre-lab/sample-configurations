@@ -199,6 +199,8 @@ def calculate_energy(args, fragment):
     if args.fix_atoms:
         settings.input.ams.Constraints.FixedRegion = "Fixed"
 
+    scm.plams.config.job.runscript.nproc = args.ncores
+
     job = scm.plams.AMSJob()
     job.name = "geometry-optimization"
     job.molecule = fragment
@@ -216,18 +218,24 @@ def main(args):
     fragment = scm.plams.Molecule(args.input)
     water = scm.plams.Molecule("/home/barre/master_thesis/scripts/sample-configurations/water.xyz")
 
-    if os.path.isdir("testing-configurations"):
-        raise NameError("Folder testing-configurations already exists!")
-    os.mkdir("testing-configurations")
-    os.chdir("testing-configurations")
-    test_direc = os.getcwd()
+    folder_name = "sampling-configurations"
 
+    # Creating folder in which configurations are tested
+    if os.path.isdir(folder_name):
+        raise NameError(f"{folder_name} already exists!")
+    os.mkdir(folder_name)
+    os.chdir(folder_name)
+    folder_dir = os.getcwd()
+
+    # Initializing some variables
     failed_cycles = 0
     total_energies = np.zeros(args.ncycles)
+    configurations = np.empty(args.ncycles, dtype=object)
+
     for index in range(args.ncycles):
 
         real_index = index - failed_cycles
-        os.chdir(test_direc)
+        os.chdir(folder_dir)
 
         os.mkdir(str(real_index + 1))
         os.chdir(str(real_index + 1))
@@ -236,13 +244,58 @@ def main(args):
 
             scm.plams.init()
             job = calculate_energy(args, configuration)
+            total_energies[real_index] = job.results.get_energy(unit="eV")
+            configurations[real_index] = job.results.get_main_molecule()
             scm.plams.finish()
 
         except Exception:
             failed_cycles += 1
-            os.chdir(str(test_direc))
+            os.chdir(folder_dir)
             os.rmdir(str(real_index + 1))
             print(traceback.format_exc())
+
+    os.chdir(folder_dir)
+    final_energy = np.min(total_energies)
+    final_index = np.argmin(total_energies)
+
+    # Writing most stable configuration to xyz file
+    with open(f"best-configuration-{args.nwater}-H2O.xyz", "x") as f:
+        configurations[final_index].writexyz(f)
+
+    # Writing input fragment to xyz file
+    with open("input-configuration.xyz", "x") as f:
+        fragment.writexyz(f)
+
+    # Writing output file
+    with open("results.txt", "x") as f:
+
+        # Input arguments section
+        title = "\n" + " Input arguments ".center(81, "=") + "\n"
+        f.write(title)
+        for key in vars(args):
+            keystr = f"{key}: ".ljust(25)
+            f.write(f"{keystr} {vars(args)[key]}\n")
+
+        # Configurations section
+        title = "\n" + " Configurations ".center(81, "=") + "\n"
+        f.write(title)
+        headers = ["Dir", "Total energy [eV]"]
+        spaces = [25, 10]
+        for header, space in zip(headers, spaces):
+            str_header = f"{header}".ljust(space)
+            f.write(str_header)
+        f.write("\n")
+        for direc, energy in enumerate(total_energies, start=1):
+            f.write(f"{direc}".ljust(24) + f"{energy}" + "\n")
+
+        # Best configuration
+        title = "\n" + " Best configuration (lowest energy) ".center(81, "=") + "\n"
+        f.write(title)
+        variable_names = ["Directory", "Energy [eV]"]
+        variables = [final_index + 1, final_energy]
+        for name, variable in zip(variable_names, variables):
+            str_name = f"{name}: ".ljust(25)
+            f.write(f"{str_name} {variable}\n")
 
 
 if __name__ == '__main__':
