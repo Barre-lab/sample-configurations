@@ -2,7 +2,8 @@
 
 import argparse
 import random
-import time
+import traceback
+import os
 import numpy as np
 import scm.plams
 
@@ -28,6 +29,24 @@ def parse_arguments():
             "ncycles",
             type=int,
             help="The number of cycles (frames) to generate and test")
+
+    parser.add_argument(
+            "-c", "--charge",
+            type=int,
+            default=0,
+            help="The total charge of the fragment")
+
+    parser.add_argument(
+            "-f", "--fix-atoms",
+            type=int,
+            nargs="*",
+            help="The indices of atoms to fix in place during the geometry optimization")
+
+    parser.add_argument(
+            "-nc", "--ncores",
+            type=int,
+            default=8,
+            help="The number of nodes to use for each calculation")
 
     return parser.parse_args()
 
@@ -110,13 +129,10 @@ def generate_random_point(box):
     return np.array([x, y, z])
 
 
-def main(args):
+def get_configuration(fragment, water, nwater):
     """
-    Main part of script
+    Gets configuration of the specified number of water molecules surrounding the fragment
     """
-
-    fragment = scm.plams.Molecule(args.input)
-    water = scm.plams.Molecule("water.xyz")
 
     # Translating water such that oxygen is in the origin
     coords_oxygen = np.array(water[1].coords)
@@ -126,16 +142,13 @@ def main(args):
     center_of_mass = np.array(fragment.get_center_of_mass())
     fragment.translate(-1 * center_of_mass)
 
+    # Finding box around fragment
     box = find_box(fragment)
-
-    # Initializing fragment movie, showing progression of adding water
-    with open("fragment.xyz", "w") as f:
-        fragment.writexyz(f)
 
     # Creating a copy of the fragment without water as a future reference for distances
     fragment_no_water = fragment.copy()
 
-    for nwater in range(args.nwater):
+    for index in range(nwater):
 
         # Initializing a new water molecule
         new_water = water.copy()
@@ -158,22 +171,78 @@ def main(args):
                 correct_position_water = True
 
             elif index > 200:
-                raise ValueError(f"Cannot add water atom number {nwater}")
+                raise ValueError(f"Cannot add water atom number {index}")
 
             index += 1
 
         # Adding the final (correct) water molecule from the while loop
         fragment += water_copy
 
-        with open("fragment.xyz", "a") as f:
-            fragment.writexyz(f)
+    return fragment
 
 
+def calculate_energy(args, fragment):
+    """
+    Calculates the total energy of the given fragment with an optional geometry optimization
+    """
 
-    #with open("rotated_water.xyz", "w") as f:
-    #    for frame in range(1000):
-    #        water.rotate(random_rotation_matrix())
-    #        water.writexyz(f)
+    # Fixing provided atoms in place
+    for atom in fragment:
+        if fragment.index(atom) in args.fix_atoms:
+            atom.properties.region = {"Fixed"}
+
+    settings = scm.plams.Settings()
+    settings.input.DFTB.Model = "GFN1-xTB"
+    settings.input.ams.Task = "GeometryOptimization"
+    settings.input.ams.System.Charge = args.charge
+
+    if args.fix_atoms:
+        settings.input.ams.Constraints.FixedRegion = "Fixed"
+
+    job = scm.plams.AMSJob()
+    job.name = "geometry-optimization"
+    job.molecule = fragment
+    job.settings = settings
+    job.run()
+
+    return job
+
+
+def main(args):
+    """
+    Main entry of the script
+    """
+
+    fragment = scm.plams.Molecule(args.input)
+    water = scm.plams.Molecule("/home/barre/master_thesis/scripts/sample-configurations/water.xyz")
+
+    if os.path.isdir("testing-configurations"):
+        raise NameError("Folder testing-configurations already exists!")
+    os.mkdir("testing-configurations")
+    os.chdir("testing-configurations")
+    test_direc = os.getcwd()
+
+    failed_cycles = 0
+    total_energies = np.zeros(args.ncycles)
+    for index in range(args.ncycles):
+
+        real_index = index - failed_cycles
+        os.chdir(test_direc)
+
+        os.mkdir(str(real_index + 1))
+        os.chdir(str(real_index + 1))
+        try:
+            configuration = get_configuration(fragment, water, args.nwater)
+
+            scm.plams.init()
+            job = calculate_energy(args, configuration)
+            scm.plams.finish()
+
+        except Exception:
+            failed_cycles += 1
+            os.chdir(str(test_direc))
+            os.rmdir(str(real_index + 1))
+            print(traceback.format_exc())
 
 
 if __name__ == '__main__':
