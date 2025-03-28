@@ -24,6 +24,11 @@ def parse_arguments():
             type=int,
             help="The number of water molecules to place around the input fragment")
 
+    parser.add_argument(
+            "ncycles",
+            type=int,
+            help="The number of cycles (frames) to generate and test")
+
     return parser.parse_args()
 
 
@@ -113,12 +118,9 @@ def main(args):
     fragment = scm.plams.Molecule(args.input)
     water = scm.plams.Molecule("water.xyz")
 
-    # Randomly translating the water molecule
+    # Translating water such that oxygen is in the origin
     coords_oxygen = np.array(water[1].coords)
     water.translate(-1 * coords_oxygen)
-    water.rotate(random_rotation_matrix())
-    center_of_mass = np.array(water.get_center_of_mass())
-    water.translate(-1 * center_of_mass)
 
     # Translating the fragment such that the center of mass is in the origin
     center_of_mass = np.array(fragment.get_center_of_mass())
@@ -126,28 +128,42 @@ def main(args):
 
     box = find_box(fragment)
 
+    # Initializing fragment movie, showing progression of adding water
     with open("fragment.xyz", "w") as f:
         fragment.writexyz(f)
 
-    for nwater in range(args.nwater):
-        correct_water = False
-        index = 1
-        while not correct_water:
-            water_copy = water.copy()
-            fragment_copy = fragment.copy()
+    # Creating a copy of the fragment without water as a future reference for distances
+    fragment_no_water = fragment.copy()
 
+    for nwater in range(args.nwater):
+
+        # Initializing a new water molecule
+        new_water = water.copy()
+        new_water.rotate(random_rotation_matrix())
+
+        # Getting the new water molecule into a correct position
+        correct_position_water = False
+        index = 1
+        while not correct_position_water:
+
+            # Translating water to new random position
+            water_copy = new_water.copy()
             random_point = generate_random_point(box)
             water_copy.translate(random_point)
 
-            distance_new_water = water_copy.distance_to_mol(fragment)
-            print(f"Loop {index}, distance: {distance_new_water}")
-            if 2.5 < distance_new_water < 4:
-                correct_water = True
+            # Evaluating distance between new water and the fragment with and without water
+            distance_fragment = water_copy.distance_to_mol(fragment_no_water)
+            distance_water = water_copy.distance_to_mol(fragment)
+            if 2.5 < distance_fragment < 4 and distance_water > 2.5:
+                correct_position_water = True
 
-            fragment_with_water = fragment_copy + water_copy
+            elif index > 200:
+                raise ValueError(f"Cannot add water atom number {nwater}")
+
             index += 1
 
-        fragment = fragment_with_water
+        # Adding the final (correct) water molecule from the while loop
+        fragment += water_copy
 
         with open("fragment.xyz", "a") as f:
             fragment.writexyz(f)
