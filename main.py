@@ -129,10 +129,13 @@ def generate_random_point(box):
     return np.array([x, y, z])
 
 
-def get_configuration(fragment, water, nwater):
+def get_configuration(input_fragment, water, nwater):
     """
     Gets configuration of the specified number of water molecules surrounding the fragment
     """
+
+    # Making copy of input fragment, to not modify the input fragment itself
+    fragment = input_fragment.copy()
 
     # Translating water such that oxygen is in the origin
     coords_oxygen = np.array(water[1].coords)
@@ -187,9 +190,10 @@ def calculate_energy(args, fragment):
     """
 
     # Fixing provided atoms in place
-    for atom in fragment:
-        if fragment.index(atom) in args.fix_atoms:
-            atom.properties.region = {"Fixed"}
+    if args.fix_atoms:
+        for atom in fragment:
+            if fragment.index(atom) in args.fix_atoms:
+                atom.properties.region = {"Fixed"}
 
     settings = scm.plams.Settings()
     settings.input.DFTB.Model = "GFN1-xTB"
@@ -218,7 +222,7 @@ def main(args):
     fragment = scm.plams.Molecule(args.input)
     water = scm.plams.Molecule("/home/barre/master_thesis/scripts/sample-configurations/water.xyz")
 
-    folder_name = "sampling-configurations"
+    folder_name = f"configurations-{args.nwater}-H2O"
 
     # Creating folder in which configurations are tested
     if os.path.isdir(folder_name):
@@ -259,11 +263,11 @@ def main(args):
     final_index = np.argmin(total_energies)
 
     # Writing most stable configuration to xyz file
-    with open(f"best-configuration-{args.nwater}-H2O.xyz", "x") as f:
+    with open(f"output-{args.nwater}-H2O.xyz", "x") as f:
         configurations[final_index].writexyz(f)
 
     # Writing input fragment to xyz file
-    with open("input-configuration.xyz", "x") as f:
+    with open("input.xyz", "x") as f:
         fragment.writexyz(f)
 
     # Writing output file
