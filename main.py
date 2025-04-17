@@ -4,8 +4,12 @@ import argparse
 import random
 import traceback
 import os
+import time
+from typing import List
 import numpy as np
 import scm.plams
+from scm.plams import to_smiles
+from scm.plams.interfaces.molecule.rdkit import from_smiles
 
 
 def parse_arguments():
@@ -21,14 +25,24 @@ def parse_arguments():
             help="Input xyz file with fragment")
 
     parser.add_argument(
-            "nwater",
-            type=int,
-            help="The number of water molecules to place around the input fragment")
-
-    parser.add_argument(
             "ncycles",
             type=int,
             help="The number of cycles (frames) to generate and test")
+
+    parser.add_argument(
+            "-m", "--molecules",
+            type=str,
+            nargs="+",
+            default="O",
+            required=True,
+            help="The list of molecule types to generate around the fragment in smiles format")
+
+    parser.add_argument(
+            "-n", "--number-molecules",
+            type=int,
+            nargs="+",
+            required=True,
+            help="The numbers of molecules to generate for each molecule in the molecules list")
 
     parser.add_argument(
             "-c", "--charge",
@@ -129,17 +143,22 @@ def generate_random_point(box):
     return np.array([x, y, z])
 
 
-def get_configuration(input_fragment, water, nwater):
+def get_configuration(input_fragment: scm.plams.Molecule, molecules: List[scm.plams.Molecule]):
     """
-    Gets configuration of the specified number of water molecules surrounding the fragment
+    Randomly rotates and positions each molecule in the molecules list around the fragment in
+    an iterative way.
+
+    The allowed distance interval between each added molecule and the fragment is specified as
+    (2.5, 4) Angstrom and the minimum distance between each added molecule is 2.5 Angstrom.
     """
 
     # Making copy of input fragment, to not modify the input fragment itself
     fragment = input_fragment.copy()
 
-    # Translating water such that oxygen is in the origin
-    coords_oxygen = np.array(water[1].coords)
-    water.translate(-1 * coords_oxygen)
+    # Translating molecules such that their center of mass is in the origin
+    for molecule in molecules:
+        center_of_mass = np.array(molecule.get_center_of_mass())
+        molecule.translate(-1 * center_of_mass)
 
     # Translating the fragment such that the center of mass is in the origin
     center_of_mass = np.array(fragment.get_center_of_mass())
@@ -149,44 +168,44 @@ def get_configuration(input_fragment, water, nwater):
     box = find_box(fragment)
 
     # Creating a copy of the fragment without water as a future reference for distances
-    fragment_no_water = fragment.copy()
+    fragment_no_solvent = fragment.copy()
 
-    for index in range(nwater):
+    for mol_index, molecule in enumerate(molecules, start=1):
 
-        # Initializing a new water molecule
-        new_water = water.copy()
-        new_water.rotate(random_rotation_matrix())
+        # Initializing a new solvent molecule
+        new_molecule = molecule.copy()
+        new_molecule.rotate(random_rotation_matrix())
 
-        # Getting the new water molecule into a correct position
-        correct_position_water = False
+        # Getting the new solvent molecule into a correct position
+        correct_position = False
         index = 1
-        while not correct_position_water:
+        while not correct_position:
 
             # Translating water to new random position
-            water_copy = new_water.copy()
+            molecule_copy = new_molecule.copy()
             random_point = generate_random_point(box)
-            water_copy.translate(random_point)
+            molecule_copy.translate(random_point)
 
             # Evaluating distance between new water and the fragment with and without water
-            distance_fragment = water_copy.distance_to_mol(fragment_no_water)
-            distance_water = water_copy.distance_to_mol(fragment)
-            if 2.5 < distance_fragment < 4 and distance_water > 2.5:
-                correct_position_water = True
+            distance_fragment = molecule_copy.distance_to_mol(fragment_no_solvent)
+            distance_solvents = molecule_copy.distance_to_mol(fragment)
+            if 2.5 < distance_fragment < 4 and distance_solvents > 2.5:
+                correct_position = True
 
-            elif index > 200:
-                raise ValueError(f"Cannot add water atom number {index}")
+            elif index > 500:
+                raise ValueError(f"Cannot add molecule {to_smiles(molecule)}, number {mol_index}")
 
             index += 1
 
         # Adding the final (correct) water molecule from the while loop
-        fragment += water_copy
+        fragment += molecule_copy
 
     return fragment
 
 
 def calculate_energy(args, fragment):
     """
-    Calculates the total energy of the given fragment with an optional geometry optimization
+    Calculates the total energy of the given fragment after performing a geometry optimization
     """
 
     # Fixing provided atoms in place
@@ -219,17 +238,38 @@ def main(args):
     Main entry of the script
     """
 
+    # Enforcing some requirements in the arguments
+    if len(args.molecules) != len(args.number_molecules):
+        raise ValueError("Number of molecule types and corresponding numbers is not the same")
+
     fragment = scm.plams.Molecule(args.input)
-    water = scm.plams.Molecule("/home/barre/master_thesis/scripts/sample-configurations/water.xyz")
+    molecule_types = [from_smiles(molecule) for molecule in args.molecules]
+    molecule_numbers = args.number_molecules
 
-    folder_name = f"configurations-{args.nwater}-H2O"
+    # Creating a list with the correct number of molecules of each molecule type
+    molecules = []
+    for index, molecule_type in enumerate(molecule_types):
+        molecules += [molecule_type] * molecule_numbers[index]
 
-    # Creating folder in which configurations are tested
+    # Naming the output folder according to the number of generated water molecules
+    nwater = args.number_molecules[args.molecules.index("O")]
+    folder_name = f"configurations-{nwater}-H2O"
+
+    # Creating folder in which configurations are optimized
     if os.path.isdir(folder_name):
         raise NameError(f"{folder_name} already exists!")
     os.mkdir(folder_name)
     os.chdir(folder_name)
     folder_dir = os.getcwd()
+
+    # Already writing 'Input arguments' section to output file
+    with open("results.txt", "x") as f:
+        title = "\n" + " Input arguments ".center(81, "=") + "\n"
+        f.write(title)
+        for key in vars(args):
+            keystr = f"{key}: ".ljust(25)
+            f.write(f"{keystr} {vars(args)[key]}\n")
+            f.flush()
 
     # Initializing some variables
     failed_cycles = 0
@@ -244,7 +284,8 @@ def main(args):
         os.mkdir(str(real_index + 1))
         os.chdir(str(real_index + 1))
         try:
-            configuration = get_configuration(fragment, water, args.nwater)
+            random.shuffle(molecules)
+            configuration = get_configuration(fragment, molecules)
 
             scm.plams.init()
             job = calculate_energy(args, configuration)
@@ -263,7 +304,7 @@ def main(args):
     final_index = np.argmin(total_energies)
 
     # Writing most stable configuration to xyz file
-    with open(f"output-{args.nwater}-H2O.xyz", "x") as f:
+    with open(f"output-{nwater}-H2O.xyz", "x") as f:
         configurations[final_index].writexyz(f)
 
     # Writing input fragment to xyz file
@@ -271,14 +312,7 @@ def main(args):
         fragment.writexyz(f)
 
     # Writing output file
-    with open("results.txt", "x") as f:
-
-        # Input arguments section
-        title = "\n" + " Input arguments ".center(81, "=") + "\n"
-        f.write(title)
-        for key in vars(args):
-            keystr = f"{key}: ".ljust(25)
-            f.write(f"{keystr} {vars(args)[key]}\n")
+    with open("results.txt", "a") as f:
 
         # Configurations section
         title = "\n" + " Configurations ".center(81, "=") + "\n"
