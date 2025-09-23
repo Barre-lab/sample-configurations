@@ -57,6 +57,13 @@ def parse_arguments():
             help="The indices of atoms to fix in place during the geometry optimization")
 
     parser.add_argument(
+            "-p", "--perturbation",
+            nargs="?",
+            type=float,
+            const=0.2,
+            help="The applied perturbation of the fragment atoms")
+
+    parser.add_argument(
             "-nc", "--ncores",
             type=int,
             default=8,
@@ -189,7 +196,7 @@ def get_configuration(input_fragment: scm.plams.Molecule, molecules: List[scm.pl
             # Evaluating distance between new water and the fragment with and without water
             distance_fragment = molecule_copy.distance_to_mol(fragment_no_solvent)
             distance_solvents = molecule_copy.distance_to_mol(fragment)
-            if 2.5 < distance_fragment < 4 and distance_solvents > 2.5:
+            if 1.65 < distance_fragment < 2.7 and distance_solvents > 2.5:
                 correct_position = True
 
             elif index > 500:
@@ -203,9 +210,9 @@ def get_configuration(input_fragment: scm.plams.Molecule, molecules: List[scm.pl
     return fragment
 
 
-def calculate_energy(args, fragment):
+def optimize_geometry(args, fragment):
     """
-    Calculates the total energy of the given fragment after performing a geometry optimization
+    Optimizes the geometry of the given fragment.
     """
 
     # Fixing provided atoms in place
@@ -288,7 +295,7 @@ def main(args):
             configuration = get_configuration(fragment, molecules)
 
             scm.plams.init()
-            job = calculate_energy(args, configuration)
+            job = optimize_geometry(args, configuration)
             total_energies[real_index] = job.results.get_energy(unit="eV")
             configurations[real_index] = job.results.get_main_molecule()
             scm.plams.finish()
