@@ -111,7 +111,6 @@ def perturb_bond(fragment, bond, moving_atom, bond_length_scale,
     dfs(moving_atom)
 
     if len(atoms_to_move) == len(fragment):
-        print("chosen bond does not divide molecule")
         return
 
     # Identify pivot atom (fixed) and bond vectors
@@ -181,7 +180,6 @@ def guarded_random_bond_pertubation(fragment, bond, moving_atom, max_bond_length
         # Checking if connectivity has changed
         fragment.guess_bonds()
         if fragment.get_connection_table() == ref_conn:
-            print("Pertubation made")
             break
 
         # Connectivity has changed so fragment before perturbation is restored
@@ -207,9 +205,6 @@ def perturb_molecule_randomly(molecule, max_bond_length_scale=1.1,
     fragment.guess_bonds()
 
     index = get_random_atom(fragment)
-
-    # Using same index for testing
-    index = 24
     initial_atom = fragment[index]
     print(f"Initial index: {index}")
 
@@ -232,8 +227,5 @@ def perturb_molecule_randomly(molecule, max_bond_length_scale=1.1,
 
             visited.add(neighbor)
             queue.append(neighbor)
-
-    with open("output-mol.xyz", "w") as f:
-        fragment.writexyz(f)
 
     return fragment

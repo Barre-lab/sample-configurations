@@ -11,6 +11,8 @@ import scm.plams
 from scm.plams import to_smiles
 from scm.plams.interfaces.molecule.rdkit import from_smiles
 
+from pertubation import perturb_molecule_randomly
+
 
 def parse_arguments():
     """
@@ -57,11 +59,9 @@ def parse_arguments():
             help="The indices of atoms to fix in place during the geometry optimization")
 
     parser.add_argument(
-            "-p", "--perturbation",
-            nargs="?",
-            type=float,
-            const=0.2,
-            help="The applied perturbation of the fragment atoms")
+            "-rp", "--perturbation",
+            action="store_true",
+            help="Applies a random perturbation to the fragment")
 
     parser.add_argument(
             "-nc", "--ncores",
@@ -292,6 +292,9 @@ def main(args):
         os.chdir(str(real_index + 1))
         try:
             random.shuffle(molecules)
+            if args.perturbation:
+                fragment = perturb_molecule_randomly(fragment)
+                print("Perturbation applied!")
             configuration = get_configuration(fragment, molecules)
 
             scm.plams.init()
