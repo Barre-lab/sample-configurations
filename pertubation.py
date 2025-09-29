@@ -50,7 +50,7 @@ def rotation_in_cone(input_v, theta, phi):
     length which is then transformed by phi and theta. (theta is angle with
     the z-axis)
 
-    Both angles are given in degrees.
+    Both angles are given in radians.
     """
 
     v = np.array(input_v, float)
@@ -90,7 +90,7 @@ def perturb_bond(fragment, bond, moving_atom, bond_length_scale,
     perturbation of the vector between the two provided atoms
     to all the moving atoms.
 
-    All angles are given in degrees.
+    All angles are given in radians.
 
     Parameters
     ----------
@@ -152,7 +152,7 @@ def guarded_random_bond_pertubation(fragment, bond, moving_atom, max_bond_length
 
     If the maximum number of tries is exceeded, no perturbation is applied.
 
-    All angles are given in degrees.
+    All angles are given in radians.
     """
 
     if not fragment.bonds:
